@@ -75,6 +75,8 @@ thread_local! {
     static COLOURS: RefCell<Option<Colours>> = const { RefCell::new(None) };
     /// Set by `shutdown`: from then on nothing is applied and the icon is not re-added.
     static EXITING: Cell<bool> = const { Cell::new(false) };
+    /// Set by `WM_QUERYENDSESSION`, cleared if the session end is cancelled: nothing is applied meanwhile.
+    static SUSPENDED: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn run() -> i32 {
@@ -220,7 +222,19 @@ fn set_exiting() {
     let _ = EXITING.try_with(|e| e.set(true));
 }
 
+fn suspended() -> bool {
+    SUSPENDED.try_with(Cell::get).unwrap_or(true)
+}
+
+fn set_suspended(on: bool) {
+    let _ = SUSPENDED.try_with(|s| s.set(on));
+}
+
 /// Runs `f` on the colour state; `None` if it is missing or already borrowed.
+///
+/// Invariant: no `COLOURS` borrow spans a message-pumping call, so a borrow can only fail if a
+/// callback re-enters from inside a borrow, which the code never allows. `evaluate` still
+/// defers itself on a failed borrow; `restore_all` and `reload_config` are no-ops then.
 fn with_colours<R>(f: impl FnOnce(&mut Colours) -> R) -> Option<R> {
     COLOURS.try_with(|cell| cell.try_borrow_mut().ok().and_then(|mut slot| slot.as_mut().map(f))).ok().flatten()
 }
@@ -260,10 +274,10 @@ fn evaluate(arm_timer: bool) {
     let Some(f) = fixed() else { return };
     // SAFETY: plain call.
     let fg = foreground_info(unsafe { GetForegroundWindow() });
-    // Some(applied), or None when the state is already borrowed (re-entered).
+    // Some(applied), or None when the state is already borrowed (re-entered; see `with_colours`).
     let outcome = COLOURS.try_with(|cell| match cell.try_borrow_mut() {
         Ok(mut slot) => Some(slot.as_mut().is_some_and(|c| {
-            !exiting() && c.engine.update(fg.as_ref(), &c.config, &mut c.display, &mut c.store)
+            !exiting() && !suspended() && c.engine.update(fg.as_ref(), &c.config, &mut c.display, &mut c.store)
         })),
         Err(_) => None,
     });
@@ -285,16 +299,21 @@ fn restore_all() {
     with_colours(|c| c.engine.restore_all(&mut c.display, &mut c.store));
 }
 
+fn kill_reapply_timer() {
+    if let Some(f) = fixed() {
+        // SAFETY: our own window's timer; harmless if it is not set.
+        unsafe { KillTimer(f.hwnd, REAPPLY_TIMER) };
+    }
+}
+
 /// Normal colours back, re-apply timer off, icon removed. Idempotent; nothing is applied afterwards.
+/// The WinEvent hook is not unhooked here: the system frees it when this thread exits.
 fn shutdown() {
     if exiting() {
         return;
     }
     set_exiting();
-    if let Some(f) = fixed() {
-        // SAFETY: our own window's timer; harmless if it is not set.
-        unsafe { KillTimer(f.hwnd, REAPPLY_TIMER) };
-    }
+    kill_reapply_timer();
     restore_all();
     remove_icon();
 }
@@ -380,15 +399,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_QUERYENDSESSION => {
+            // Hold off the re-apply timer and hook until WM_ENDSESSION says whether the session ends.
+            set_suspended(true);
+            kill_reapply_timer();
             restore_all();
             1
         }
         WM_ENDSESSION => {
             if wparam != 0 {
-                set_exiting();
-                restore_all();
+                // Logoff/shutdown, or Restart Manager closing us (ENDSESSION_CLOSEAPP): exit like Exit does.
+                shutdown();
+                // SAFETY: plain call.
+                unsafe { PostQuitMessage(0) };
             } else {
-                // Shutdown was cancelled after WM_QUERYENDSESSION restored: re-apply for the window in front.
+                // Cancelled after WM_QUERYENDSESSION restored: resume and re-apply for the window in front.
+                set_suspended(false);
                 evaluate(false);
             }
             0
