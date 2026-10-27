@@ -3,8 +3,11 @@
 
 mod config;
 mod engine;
+mod icon;
 mod ramp;
 mod restore;
+#[cfg(windows)]
+mod settings;
 mod vibrance;
 #[cfg(windows)]
 mod win;
@@ -14,6 +17,9 @@ fn main() {
     #[cfg(debug_assertions)]
     if std::env::args().nth(1).as_deref() == Some("--probe") {
         std::process::exit(win::probe::run());
+    }
+    if std::env::args().nth(1).as_deref() == Some("--settings") {
+        std::process::exit(settings::run());
     }
     if std::env::args().nth(1).as_deref() == Some("--set-gamma-range") {
         std::process::exit(if win::registry::write_gamma_range() { 0 } else { 1 });

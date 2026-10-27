@@ -11,15 +11,13 @@ use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitFo
 use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
+use super::wide;
+
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const RUN_VALUE: &str = "BrightMarmot";
 const ICM_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ICM";
 const GAMMA_RANGE_VALUE: &str = "GdiIcmGammaRange";
 const GAMMA_RANGE_FULL: u32 = 256;
-
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
 
 /// Opens (optionally creating) a key; closes it on drop.
 struct Key(HKEY);
