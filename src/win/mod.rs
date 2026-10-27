@@ -1,5 +1,6 @@
 pub mod display;
 pub mod exe_icon;
+pub mod foreground;
 pub mod gamma;
 pub mod ipc;
 pub mod nvapi;
