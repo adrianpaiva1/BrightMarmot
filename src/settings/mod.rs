@@ -9,11 +9,13 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, Align, Align2, FontId, Layout, Margin, Rect, Sense, pos2, vec2};
 
-use crate::config::{self, AddOutcome, Config, Game};
+use crate::config::{self, AddOutcome, Config, Game, LoadOutcome};
 use crate::icon::app_icon_rgba;
 use crate::win::{display, exe_icon, ipc, registry};
 
 const ICON_SIZE: u32 = 64;
+const UNREADABLE_NOTE: &str = "Couldn't read config.json, so changes won't be saved this session.";
+const SAVE_FAILED_NOTE: &str = "Couldn't save settings.";
 
 pub fn run() -> i32 {
     let Some(_instance) = ipc::single_instance(ipc::MUTEX_SETTINGS) else {
@@ -21,13 +23,24 @@ pub fn run() -> i32 {
         return 0;
     };
 
-    let path = config::default_path();
-    let config = path.as_deref().map(|p| config::load(p).0).unwrap_or_default();
+    let mut path = config::default_path();
+    let (config, outcome) = path.as_deref().map_or((Config::default(), LoadOutcome::Missing), config::load);
+    let load_note = match outcome {
+        LoadOutcome::Loaded | LoadOutcome::Missing => None,
+        LoadOutcome::Corrupt => Some(config::CORRUPT_NOTICE),
+        // The file is still there: never save this empty config over it.
+        LoadOutcome::Unreadable => {
+            path = None;
+            Some(UNREADABLE_NOTE)
+        }
+    };
     let app = SettingsApp {
         selected: if config.games.is_empty() { None } else { Some(0) },
         config,
         path,
         dirty: false,
+        load_note,
+        save_failed: false,
         nv_available: display::nvidia_colour_available(),
         gamma_range_enabled: registry::gamma_range_enabled(),
         icons: IconCache::default(),
@@ -81,10 +94,14 @@ impl IconCache {
 
 struct SettingsApp {
     config: Config,
-    /// `None` when `%APPDATA%` is not set: changes then live only for this session.
+    /// `None` when `%APPDATA%` is not set or the file couldn't be read: changes then live only for this session.
     path: Option<PathBuf>,
     selected: Option<usize>,
     dirty: bool,
+    /// Shown in the app section when the load at startup was not clean.
+    load_note: Option<&'static str>,
+    /// The last save failed; cleared by the next one that succeeds.
+    save_failed: bool,
     nv_available: bool,
     gamma_range_enabled: bool,
     icons: IconCache,
@@ -110,14 +127,23 @@ impl SettingsApp {
         }
     }
 
+    /// `dirty` is cleared only once the file is written; after a failure the next frame egui
+    /// draws retries. Frames come from input, and nothing here requests a repaint.
     fn save(&mut self) {
-        self.dirty = false;
-        let Some(path) = &self.path else { return };
+        let Some(path) = &self.path else {
+            self.dirty = false;
+            return;
+        };
         match config::save(path, &self.config) {
             Ok(()) => {
+                self.dirty = false;
+                self.save_failed = false;
                 ipc::notify_tray(ipc::MSG_CONFIG_CHANGED);
             }
-            Err(e) => eprintln!("BrightMarmot: could not save {}: {e}", path.display()),
+            Err(e) => {
+                eprintln!("BrightMarmot: could not save {}: {e}", path.display());
+                self.save_failed = true;
+            }
         }
     }
 
@@ -186,19 +212,25 @@ impl SettingsApp {
             });
             ui.label(theme::secondary("Needs admin once and a Windows restart.").small());
         }
+        for note in [self.load_note, self.save_failed.then_some(SAVE_FAILED_NOTE)].into_iter().flatten() {
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(note).color(theme::ACCENT));
+        }
     }
 
     fn set_start_with_windows(&mut self, on: bool) {
-        let registered = if on {
+        let done = if on {
             std::env::current_exe().is_ok_and(|exe| registry::set_run_entry(&exe.to_string_lossy()))
         } else {
-            // False also means the value was already absent, which is what we want.
+            // Check that the value is gone: the delete also returns false when it was already absent.
             registry::delete_run_entry();
-            true
+            registry::get_run_entry().is_none()
         };
-        // If the Run value could not be written, leave the switch off.
-        self.config.start_with_windows = on && registered;
-        self.dirty = true;
+        // If the Run value could not be written or removed, leave the switch and config as they were.
+        if done {
+            self.config.start_with_windows = on;
+            self.dirty = true;
+        }
     }
 
     fn remove_selected(&mut self) {

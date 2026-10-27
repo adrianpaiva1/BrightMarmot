@@ -12,6 +12,14 @@ pub struct WindowInfo {
     pub cloaked: bool,
 }
 
+impl WindowInfo {
+    /// Visible, unowned, not a tool window, not cloaked, and titled. Needs no exe path, so the
+    /// window list can check it before looking the path up.
+    pub fn is_app_window(&self) -> bool {
+        self.visible && !self.has_owner && !self.tool_window && !self.cloaked && !self.title.trim().is_empty()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunningApp {
     pub exe_path: String,
@@ -23,7 +31,7 @@ pub struct RunningApp {
 pub fn running_apps(windows: &[WindowInfo], self_exe_name: &str, config: &Config) -> Vec<RunningApp> {
     let mut out: Vec<RunningApp> = Vec::new();
     for w in windows {
-        if !w.visible || w.has_owner || w.tool_window || w.cloaked || w.title.trim().is_empty() || w.exe_path.is_empty() {
+        if !w.is_app_window() || w.exe_path.is_empty() {
             continue;
         }
         let exe_name = exe_name_from_path(&w.exe_path);

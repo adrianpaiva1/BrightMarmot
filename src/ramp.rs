@@ -3,6 +3,7 @@ use crate::config::Game;
 /// R, G, B rows of 256 entries; same layout `SetDeviceGammaRamp` expects.
 pub type GammaRamp = [[u16; 256]; 3];
 
+#[cfg(test)]
 pub fn identity() -> GammaRamp {
     let mut r = [[0u16; 256]; 3];
     for ch in r.iter_mut() {
@@ -21,6 +22,7 @@ pub struct CurveParams {
 }
 
 impl CurveParams {
+    #[cfg(any(test, debug_assertions))]
     pub const NEUTRAL: CurveParams = CurveParams { gamma: 1.0, contrast: 1.0, shadow_boost: 0.0 };
 
     /// Switched-off controls contribute their neutral value.

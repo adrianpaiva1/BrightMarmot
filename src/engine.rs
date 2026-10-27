@@ -97,6 +97,7 @@ impl Engine {
         }
     }
 
+    #[cfg(test)]
     pub fn active_monitors(&self) -> Vec<String> {
         self.active.keys().cloned().collect()
     }

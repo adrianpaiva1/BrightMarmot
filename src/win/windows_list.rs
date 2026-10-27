@@ -13,6 +13,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use super::ipc::process_image_path;
 use crate::apps::WindowInfo;
 
+/// Top-level windows that pass `WindowInfo::is_app_window`; only those get their process opened.
 pub fn top_level_windows() -> Vec<WindowInfo> {
     let mut out: Vec<WindowInfo> = Vec::new();
     // SAFETY: the callback only dereferences the Vec pointer passed here, which outlives the call.
@@ -42,11 +43,13 @@ unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32).max(0) as usize;
         let title = String::from_utf16_lossy(&buf[..n.min(buf.len())]);
 
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(hwnd, &mut pid);
-        let exe_path = process_image_path(pid).unwrap_or_default();
-
-        out.push(WindowInfo { exe_path, title, visible, has_owner, tool_window, cloaked });
+        let mut info = WindowInfo { exe_path: String::new(), title, visible, has_owner, tool_window, cloaked };
+        if info.is_app_window() {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            info.exe_path = process_image_path(pid).unwrap_or_default();
+            out.push(info);
+        }
     }
     1
 }

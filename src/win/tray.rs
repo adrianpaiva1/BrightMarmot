@@ -13,10 +13,11 @@ use windows_sys::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, AppendMenuW, ASFW_ANY, CreateIcon, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
     DestroyIcon, DestroyMenu, DispatchMessageW, GetCursorPos, GetForegroundWindow, GetMessageW, HICON, IDYES,
-    KillTimer, MB_ICONINFORMATION, MB_SETFOREGROUND, MB_YESNO, MF_STRING, MSG, MessageBoxW, PostMessageW,
-    PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    TrackPopupMenu, TranslateMessage, WM_APP, WM_DESTROY, WM_DISPLAYCHANGE, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_NULL,
-    WM_QUERYENDSESSION, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
+    KillTimer, MB_ICONINFORMATION, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MB_YESNO, MF_STRING, MSG, MessageBoxW,
+    PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, TPM_BOTTOMALIGN, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_DESTROY, WM_DISPLAYCHANGE, WM_ENDSESSION,
+    WM_LBUTTONDBLCLK, WM_NULL, WM_QUERYENDSESSION, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW,
+    WS_OVERLAPPED,
 };
 
 use super::display::WinDisplay;
@@ -26,7 +27,7 @@ use super::ipc::{
     spawn_self,
 };
 use super::{registry, wide};
-use crate::config::{self, Config};
+use crate::config::{self, Config, LoadOutcome};
 use crate::engine::{self, Engine};
 use crate::icon::app_icon_rgba;
 use crate::restore::{self, RestoreFile};
@@ -47,6 +48,7 @@ const REAPPLY_MS: u32 = 750;
 /// Window title; must never equal the Settings window title (see `ipc::SETTINGS_TITLE`).
 const TRAY_TITLE: &str = "BrightMarmot.TrayWindow";
 const APP_TITLE: &str = "BrightMarmot";
+const HOOK_FAILED: &str = "BrightMarmot couldn't watch for games, so colours won't switch. Try restarting it.";
 const GAMMA_PROMPT: &str = "Windows limits how much an app can change your screen's gamma, so stronger Gamma, Contrast and Shadow Boost settings may not work.\n\nBrightMarmot can lift that limit by changing one Windows setting (GdiIcmGammaRange). This needs admin rights once and takes effect after you restart Windows.\n\nChange it now?";
 
 /// Handles and message ids fixed at startup; readable at any time without a borrow.
@@ -87,7 +89,7 @@ pub fn run() -> i32 {
 
     // 1. Config.
     let config_path = config::default_path();
-    let mut config = config_path.as_deref().map(|p| config::load(p).0).unwrap_or_default();
+    let (mut config, outcome) = config_path.as_deref().map_or((Config::default(), LoadOutcome::Missing), config::load);
 
     // 2. Put back colours a previous run left changed (crash, kill, power loss).
     let mut display = WinDisplay::new();
@@ -99,12 +101,17 @@ pub fn run() -> i32 {
         update_run_entry();
     }
 
-    // 4. One-time offer to lift Windows' gamma limit.
+    // 4. Say so if a corrupt config was moved aside.
+    if matches!(outcome, LoadOutcome::Corrupt) {
+        tell_user(config::CORRUPT_NOTICE);
+    }
+
+    // 5. One-time offer to lift Windows' gamma limit.
     if !registry::gamma_range_enabled() && !config.gamma_range_prompt_answered {
         ask_gamma_range(&mut config, config_path.as_deref());
     }
 
-    // 5. Window, icon, hook, then apply in case a game is already in front.
+    // 6. Window, icon, hook, then apply in case a game is already in front.
     let icon = create_icon();
     if icon.is_null() {
         return 1;
@@ -125,7 +132,8 @@ pub fn run() -> i32 {
     COLOURS.set(Some(Colours { config_path, config, engine: Engine::new(), display, store }));
     add_icon();
     if !install_hook(Some(on_foreground)) {
-        eprintln!("BrightMarmot: could not watch the foreground window");
+        // No COLOURS borrow is held here; window messages dispatched by the box may borrow it.
+        tell_user(HOOK_FAILED);
     }
     evaluate(true);
 
@@ -161,17 +169,29 @@ fn ask_gamma_range(config: &mut Config, path: Option<&Path>) {
     let answer = unsafe {
         MessageBoxW(null_mut(), text.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONINFORMATION | MB_SETFOREGROUND)
     };
-    // Re-read first: Settings may have saved while the box was open.
-    if let Some(p) = path {
-        *config = config::load(p).0;
-    }
+    // Re-read first: Settings may have saved while the box was open. Only a file that was read
+    // or is absent is adopted and written back; one that couldn't be read is never written over.
+    let save_to = match path.map(config::load) {
+        Some((c, LoadOutcome::Loaded | LoadOutcome::Missing)) => {
+            *config = c;
+            path
+        }
+        _ => None,
+    };
     config.gamma_range_prompt_answered = true;
-    if let Some(p) = path {
+    if let Some(p) = save_to {
         let _ = config::save(p, config);
     }
     if answer == IDYES {
         registry::request_gamma_range_elevated();
     }
+}
+
+/// OK box with a warning icon and no owner. It pumps messages: never call it with a `COLOURS` borrow held.
+fn tell_user(text: &str) {
+    let (text, title) = (wide(text), wide(APP_TITLE));
+    // SAFETY: no owner window; strings outlive the call.
+    unsafe { MessageBoxW(null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONWARNING | MB_SETFOREGROUND) };
 }
 
 /// 32-bpp icon from the generated RGBA (converted to BGRA); alpha carries the shape.
@@ -318,10 +338,15 @@ fn shutdown() {
     remove_icon();
 }
 
+/// Adopts the file only if it was read or is absent. If it couldn't be read, or was corrupt
+/// (and has been moved aside), the last good config stays in use.
 fn reload_config() {
     with_colours(|c| {
         if let Some(p) = &c.config_path {
-            c.config = config::load(p).0;
+            match config::load(p) {
+                (loaded, LoadOutcome::Loaded | LoadOutcome::Missing) => c.config = loaded,
+                (_, LoadOutcome::Unreadable | LoadOutcome::Corrupt) => {}
+            }
         }
     });
 }

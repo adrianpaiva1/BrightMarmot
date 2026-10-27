@@ -119,6 +119,7 @@ impl Game {
         }
     }
 
+    #[cfg(test)]
     pub fn control(&self, k: ControlKind) -> Control {
         match k {
             ControlKind::Gamma => self.gamma,
@@ -220,16 +221,25 @@ impl Config {
 pub enum LoadOutcome {
     Loaded,
     Missing,
+    /// The file is there but could not be read (permissions, locked, ...). Left in place.
+    Unreadable,
+    /// The file was read but is not a valid config. Renamed aside to `<name>.bad`.
     Corrupt,
 }
 
+/// Shown by the tray (message box) and Settings (note) when their load found the file corrupt.
+pub const CORRUPT_NOTICE: &str = "Your BrightMarmot settings file couldn't be read, so it was moved to config.json.bad and you're starting with an empty game list.";
+
+/// A missing or unreadable file gives an empty config and is left alone; a corrupt one is
+/// renamed aside. Every outcome but `Loaded` returns `Config::default()`.
 pub fn load(path: &Path) -> (Config, LoadOutcome) {
-    if !path.exists() {
-        return (Config::default(), LoadOutcome::Missing);
-    }
-    let parsed = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| Config::from_json(&s).ok());
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Config::default(), LoadOutcome::Missing),
+        Err(_) => return (Config::default(), LoadOutcome::Unreadable),
+    };
+    // Not UTF-8 counts as corrupt content, not as a read failure.
+    let parsed = std::str::from_utf8(&bytes).ok().and_then(|s| Config::from_json(s).ok());
     match parsed {
         Some(c) => (c, LoadOutcome::Loaded),
         None => {
@@ -331,6 +341,29 @@ mod tests {
         assert_eq!(c, Config::default()); assert!(matches!(o, LoadOutcome::Corrupt));
         assert!(!p.exists());
         assert_eq!(std::fs::read_to_string(d.path().join("config.json.bad")).unwrap(), "not json");
+    }
+    #[test] fn load_non_utf8_is_corrupt() {
+        let d = tempfile::tempdir().unwrap(); let p = d.path().join("config.json");
+        std::fs::write(&p, [0xFFu8, 0xFE, 0x00]).unwrap();
+        let (c, o) = load(&p);
+        assert_eq!(c, Config::default()); assert!(matches!(o, LoadOutcome::Corrupt));
+        assert!(!p.exists() && d.path().join("config.json.bad").exists());
+    }
+    #[test] fn load_unreadable_is_left_in_place() {
+        // A directory at the config path exists but cannot be read as a file, on every OS.
+        let d = tempfile::tempdir().unwrap(); let p = d.path().join("config.json");
+        std::fs::create_dir(&p).unwrap();
+        let (c, o) = load(&p);
+        assert_eq!(c, Config::default()); assert!(matches!(o, LoadOutcome::Unreadable));
+        assert!(p.is_dir());
+        assert!(!d.path().join("config.json.bad").exists());
+    }
+    #[test] fn load_valid_file() {
+        let d = tempfile::tempdir().unwrap(); let p = d.path().join("config.json");
+        let mut c = Config::default(); c.add_game("bf6.exe");
+        std::fs::write(&p, c.to_json()).unwrap();
+        let (l, o) = load(&p);
+        assert_eq!(l, c); assert!(matches!(o, LoadOutcome::Loaded));
     }
     #[test] fn save_creates_dirs_and_leaves_no_temp() {
         let d = tempfile::tempdir().unwrap(); let p = d.path().join("sub").join("config.json");
