@@ -7,7 +7,10 @@ cd "$(dirname "$0")/.."
 
 cargo build --release --target x86_64-pc-windows-gnu
 
-if tasklist.exe 2>/dev/null | tr -d '\r' | grep -qi '^brightmarmot\.exe'; then
+# Capture first: grep -q exiting early would SIGPIPE the pipeline under pipefail.
+# A failing tasklist.exe (interop off) reads as "not running".
+running=$(tasklist.exe 2>/dev/null | tr -d '\r' || true)
+if grep -qi '^brightmarmot\.exe' <<<"$running"; then
     echo "Exit BrightMarmot from the tray first."
     exit 1
 fi
