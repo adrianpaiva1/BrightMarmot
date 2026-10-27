@@ -40,6 +40,7 @@ pub fn run() -> i32 {
             failed = true;
         }
     }
+    println!("gamma range: {}", if super::registry::gamma_range_enabled() { "enabled" } else { "not enabled" });
     if probe_nvapi() {
         failed = true;
     }
