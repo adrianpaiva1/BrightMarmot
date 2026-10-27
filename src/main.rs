@@ -2,6 +2,7 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 
 mod config;
+mod engine;
 mod ramp;
 mod restore;
 mod vibrance;
