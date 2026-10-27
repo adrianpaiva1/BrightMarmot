@@ -66,6 +66,9 @@ fn probe_nvapi() -> bool {
                     println!("{dev}: vibrance range not sensible");
                     failed = true;
                 }
+                if !(v.min <= v.current && v.current <= v.max) {
+                    println!("{dev}: warning: vibrance current outside min..max");
+                }
             }
             None => println!("{dev}: vibrance unavailable"),
         }
@@ -75,7 +78,9 @@ fn probe_nvapi() -> bool {
             None => println!("{dev}: hue unavailable"),
         }
         if let Some(v) = vib {
-            failed |= exercise(&dev, "vibrance", v.current, v.max, |x| nv.set_vibrance(&dev, x), || {
+            // Already at max: go to min so the change is still visible.
+            let target = if v.current == v.max { v.min } else { v.max };
+            failed |= exercise(&dev, "vibrance", v.current, target, |x| nv.set_vibrance(&dev, x), || {
                 nv.get_vibrance(&dev).map(|r| r.current)
             });
         }
@@ -84,7 +89,7 @@ fn probe_nvapi() -> bool {
         }
     }
     if let Some(status) = nv.failed_status() {
-        println!("nvapi: vibrance/hue switched off after status {status}");
+        println!("nvapi: vibrance/hue getters switched off after status {status}");
         failed = true;
     }
     failed

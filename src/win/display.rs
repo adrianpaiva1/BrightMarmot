@@ -16,6 +16,12 @@ impl WinDisplay {
     }
 }
 
+impl Default for WinDisplay {
+    fn default() -> WinDisplay {
+        WinDisplay::new()
+    }
+}
+
 impl DisplayBackend for WinDisplay {
     fn get_ramp(&mut self, monitor: &str) -> Option<GammaRamp> {
         gamma::get_ramp(monitor)
