@@ -3,6 +3,7 @@
 
 mod config;
 mod ramp;
+mod restore;
 mod vibrance;
 
 #[cfg(windows)]
