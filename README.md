@@ -5,8 +5,9 @@ game, set its Gamma, Contrast, Vibrance, Hue and Shadow Boost, and whenever that
 game is the window in front, those colours are applied to the monitor it is on.
 Alt-Tab away or close the game and the monitor goes back to your normal colours.
 
-It has no polling, no hooks, and never touches a game process. NVIDIA GPUs only
-(vibrance and hue use NvAPI; without it those two are skipped).
+It has no polling, no keyboard or mouse hooks, and no code runs inside any
+other process. NVIDIA GPUs only (vibrance and hue use NvAPI; without it those
+two are skipped).
 
 ## Build and install
 
