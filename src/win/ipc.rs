@@ -100,13 +100,18 @@ fn window_runs_this_exe(hwnd: HWND) -> bool {
     let mut pid = 0u32;
     // SAFETY: valid out pointer.
     unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+    process_image_path(pid).is_some_and(|path| exe_name_from_path(&path).eq_ignore_ascii_case(&own))
+}
+
+/// Full exe path of process `pid`, via a limited-query handle only. `None` if it cannot be opened.
+pub fn process_image_path(pid: u32) -> Option<String> {
     if pid == 0 {
-        return false;
+        return None;
     }
     // SAFETY: limited query access only; handle closed below.
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
-        return false;
+        return None;
     }
     let mut buf = [0u16; 1024];
     let mut len = buf.len() as u32;
@@ -115,7 +120,7 @@ fn window_runs_this_exe(hwnd: HWND) -> bool {
     // SAFETY: handle from OpenProcess, closed once.
     unsafe { CloseHandle(process) };
     let len = (len as usize).min(buf.len());
-    ok && exe_name_from_path(&String::from_utf16_lossy(&buf[..len])).eq_ignore_ascii_case(&own)
+    ok.then(|| String::from_utf16_lossy(&buf[..len]))
 }
 
 /// Starts this exe again with one argument.

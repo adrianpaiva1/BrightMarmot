@@ -1,5 +1,6 @@
 //! The Settings window (`brightmarmot.exe --settings`): its own short-lived process.
 
+mod add_game;
 mod game_view;
 mod theme;
 
@@ -8,7 +9,7 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, Align, Align2, FontId, Layout, Margin, Rect, Sense, pos2, vec2};
 
-use crate::config::{self, Config, Game};
+use crate::config::{self, AddOutcome, Config, Game};
 use crate::icon::app_icon_rgba;
 use crate::win::{display, exe_icon, ipc, registry};
 
@@ -30,6 +31,7 @@ pub fn run() -> i32 {
         nv_available: display::nvidia_colour_available(),
         gamma_range_enabled: registry::gamma_range_enabled(),
         icons: IconCache::default(),
+        add_dialog: None,
     };
 
     let options = eframe::NativeOptions {
@@ -86,9 +88,28 @@ struct SettingsApp {
     nv_available: bool,
     gamma_range_enabled: bool,
     icons: IconCache,
+    add_dialog: Option<add_game::AddGameDialog>,
 }
 
 impl SettingsApp {
+    fn open_add_dialog(&mut self) {
+        self.add_dialog = Some(add_game::AddGameDialog::new(&self.config));
+    }
+
+    fn show_add_dialog(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = self.add_dialog.as_mut() else { return };
+        match dialog.show(ctx, &mut self.icons, &self.config) {
+            add_game::DialogResult::Open => {}
+            add_game::DialogResult::Cancelled => self.add_dialog = None,
+            add_game::DialogResult::Add(path) => {
+                self.add_dialog = None;
+                let (AddOutcome::Added(i) | AddOutcome::AlreadyExists(i)) = self.config.add_game(&path);
+                self.selected = Some(i);
+                self.dirty = true;
+            }
+        }
+    }
+
     fn save(&mut self) {
         self.dirty = false;
         let Some(path) = &self.path else { return };
@@ -108,8 +129,9 @@ impl SettingsApp {
             .show(ui, |ui| {
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    // Task 9 adds the Add Game dialog.
-                    ui.add_enabled(false, egui::Button::new("+ Add game"));
+                    if ui.button("+ Add game").clicked() {
+                        self.open_add_dialog();
+                    }
                     if ui.add_enabled(self.selected.is_some(), egui::Button::new("Remove")).clicked() {
                         self.remove_selected();
                     }
@@ -191,7 +213,9 @@ impl SettingsApp {
         theme::card().inner_margin(Margin::same(24)).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             let Some(i) = self.selected.filter(|&i| i < self.config.games.len()) else {
-                empty_state(ui);
+                if empty_state(ui) {
+                    self.open_add_dialog();
+                }
                 return;
             };
             let icon = self.icons.get(ui.ctx(), &self.config.games[i].path);
@@ -214,6 +238,8 @@ impl eframe::App for SettingsApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(Margin { left: 6, right: outer, top: outer, bottom: outer }))
             .show(ui, |ui| self.right_panel(ui));
+
+        self.show_add_dialog(ui.ctx());
 
         // Save once a change is complete: not mid-drag, but on release (or right away for clicks and typing).
         if self.dirty && !ui.input(|i| i.pointer.any_down()) {
@@ -257,12 +283,16 @@ fn game_row(ui: &mut egui::Ui, game: &Game, icon: Option<&egui::TextureHandle>, 
     response
 }
 
-fn empty_state(ui: &mut egui::Ui) {
+/// True when the user clicked "Add game".
+fn empty_state(ui: &mut egui::Ui) -> bool {
+    let mut open = false;
     ui.add_space((ui.available_height() / 2.0 - 40.0).max(0.0));
     ui.vertical_centered(|ui| {
         ui.label(theme::bold("Add a game to get started.", 16.0));
         ui.add_space(8.0);
-        // Task 9 adds the Add Game dialog.
-        ui.add_enabled(false, egui::Button::new("Add game"));
+        if ui.button("Add game").clicked() {
+            open = true;
+        }
     });
+    open
 }

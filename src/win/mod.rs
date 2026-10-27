@@ -4,6 +4,7 @@ pub mod gamma;
 pub mod ipc;
 pub mod nvapi;
 pub mod registry;
+pub mod windows_list;
 #[cfg(debug_assertions)]
 pub mod probe;
 

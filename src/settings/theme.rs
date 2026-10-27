@@ -22,7 +22,7 @@ pub const ACCENT: Color32 = Color32::from_rgb(0xF5, 0xA6, 0x23);
 pub const HOVER: Color32 = Color32::from_rgb(0x2E, 0x2F, 0x34);
 pub const SELECTED: Color32 = Color32::from_rgb(0x45, 0x3A, 0x26);
 
-const BOLD: &str = "bold";
+pub const BOLD: &str = "bold";
 
 pub fn apply(ctx: &egui::Context) {
     load_fonts(ctx);
