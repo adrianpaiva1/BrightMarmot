@@ -25,7 +25,7 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--set-gamma-range") {
         std::process::exit(if win::registry::write_gamma_range() { 0 } else { 1 });
     }
-    std::process::exit(0);
+    std::process::exit(win::tray::run());
 }
 
 #[cfg(not(windows))]
