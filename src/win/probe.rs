@@ -18,14 +18,20 @@ pub fn run() -> i32 {
             continue;
         };
         println!("{dev}: read ok");
-        let bright = layered(&normal, &CurveParams { gamma: 1.05, ..CurveParams::NEUTRAL });
-        if set_ramp(&dev, &bright) {
-            println!("{dev}: set ok");
-        } else {
-            println!("{dev}: set rejected");
+        let mut applied = false;
+        for gamma in [1.5, 1.2] {
+            let bright = layered(&normal, &CurveParams { gamma, ..CurveParams::NEUTRAL });
+            if set_ramp(&dev, &bright) {
+                println!("{dev}: set ok at {gamma}");
+                applied = true;
+                break;
+            }
+            println!("{dev}: set rejected at {gamma}");
+        }
+        if !applied {
             failed = true;
         }
-        std::thread::sleep(Duration::from_secs(1));
+        std::thread::sleep(Duration::from_secs(2));
         if set_ramp(&dev, &normal) {
             println!("{dev}: restored ok");
         } else {
