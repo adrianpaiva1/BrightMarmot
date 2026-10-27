@@ -9,7 +9,7 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, AppendMenuW, ASFW_ANY, CreateIcon, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-    DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, HICON, MF_STRING, MSG,
+    DestroyIcon, DestroyMenu, DispatchMessageW, GetCursorPos, GetMessageW, HICON, MF_STRING, MSG,
     PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
     TrackPopupMenu, TranslateMessage, WM_APP, WM_DESTROY, WM_LBUTTONDBLCLK, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
     WS_EX_TOOLWINDOW, WS_OVERLAPPED,
@@ -20,6 +20,9 @@ use super::wide;
 use crate::icon::app_icon_rgba;
 
 const WM_TRAY: u32 = WM_APP + 1;
+/// Posted by the menu's Exit, so shutdown runs from the top-level message loop rather than
+/// inside the menu or the shell's icon callback.
+const WM_APP_EXIT: u32 = WM_APP + 2;
 const ID_SETTINGS: usize = 1;
 const ID_EXIT: usize = 2;
 const ICON_ID: u32 = 1;
@@ -163,11 +166,10 @@ fn show_menu(hwnd: HWND) {
     };
     match cmd as usize {
         ID_SETTINGS => open_settings(),
-        ID_EXIT => {
-            remove_icon(hwnd);
-            // SAFETY: destroys our own window; WM_DESTROY posts the quit.
-            unsafe { DestroyWindow(hwnd) };
-        }
+        // SAFETY: posting to our own window.
+        ID_EXIT => unsafe {
+            PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
+        },
         _ => {}
     }
 }
@@ -186,7 +188,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        WM_APP_EXIT => {
+            remove_icon(hwnd);
+            // Leave the loop without DestroyWindow; the window goes with the thread at process exit.
+            // SAFETY: plain call.
+            unsafe { PostQuitMessage(0) };
+            0
+        }
         WM_DESTROY => {
+            // Only reached if something else destroys the window (e.g. WM_CLOSE).
             remove_icon(hwnd);
             // SAFETY: plain call.
             unsafe { PostQuitMessage(0) };
