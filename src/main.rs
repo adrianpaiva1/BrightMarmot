@@ -2,6 +2,8 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 
 mod config;
+mod ramp;
+mod vibrance;
 
 #[cfg(windows)]
 fn main() {
