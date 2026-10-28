@@ -57,3 +57,4 @@ Windows afterwards. Settings shows the current status and a button to do it late
 2. Delete `%LOCALAPPDATA%\Programs\BrightMarmot`, `%APPDATA%\BrightMarmot` and
    `%LOCALAPPDATA%\BrightMarmot`.
 3. Optionally delete the `GdiIcmGammaRange` value from the ICM key above.
+# BrightMarmot
