@@ -23,6 +23,8 @@ The script builds a release exe and copies it to
 `%LOCALAPPDATA%\Programs\BrightMarmot\brightmarmot.exe`. If BrightMarmot is
 running it refuses; exit it from the tray first. Start the exe from Explorer.
 
+`assets/icon.svg` is the icon source; `scripts/make-icon.sh` regenerates the .ico/.png (needs `cargo install resvg`).
+
 ## Use
 
 - Double-click the tray icon to open Settings; right-click for the menu (Exit is there).

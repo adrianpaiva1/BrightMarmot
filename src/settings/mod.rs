@@ -10,10 +10,8 @@ use std::path::PathBuf;
 use eframe::egui::{self, Align, Align2, FontId, Layout, Margin, Rect, Sense, pos2, vec2};
 
 use crate::config::{self, AddOutcome, Config, Game, LoadOutcome};
-use crate::icon::app_icon_rgba;
 use crate::win::{display, exe_icon, ipc, registry};
 
-const ICON_SIZE: u32 = 64;
 const UNREADABLE_NOTE: &str = "Couldn't read config.json, so changes won't be saved this session.";
 const SAVE_FAILED_NOTE: &str = "Couldn't save settings.";
 
@@ -52,7 +50,7 @@ pub fn run() -> i32 {
             .with_title(ipc::SETTINGS_TITLE)
             .with_inner_size([1000.0, 640.0])
             .with_min_inner_size([760.0, 480.0])
-            .with_icon(egui::IconData { rgba: app_icon_rgba(ICON_SIZE), width: ICON_SIZE, height: ICON_SIZE }),
+            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon-256.png")).unwrap_or_default()),
         ..Default::default()
     };
     let result = eframe::run_native(

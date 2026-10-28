@@ -4,7 +4,6 @@
 mod apps;
 mod config;
 mod engine;
-mod icon;
 mod ramp;
 mod restore;
 #[cfg(windows)]

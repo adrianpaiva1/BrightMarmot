@@ -9,12 +9,13 @@ use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK;
+use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
 use windows_sys::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AllowSetForegroundWindow, AppendMenuW, ASFW_ANY, CreateIcon, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-    DestroyIcon, DestroyMenu, DispatchMessageW, GetCursorPos, GetForegroundWindow, GetMessageW, HICON, IDYES,
+    AllowSetForegroundWindow, AppendMenuW, ASFW_ANY, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
+    DestroyIcon, DestroyMenu, DispatchMessageW, GetCursorPos, GetForegroundWindow, GetMessageW, GetSystemMetrics, HICON, IDI_APPLICATION, IDYES, IMAGE_ICON, LoadIconW, LoadImageW,
     KillTimer, MB_ICONINFORMATION, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MB_YESNO, MF_STRING, MSG, MessageBoxW,
-    PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, TPM_BOTTOMALIGN, TPM_RETURNCMD,
+    PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, SM_CXSMICON, SM_CYSMICON, TPM_BOTTOMALIGN, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_DESTROY, WM_DISPLAYCHANGE, WM_ENDSESSION,
     WM_LBUTTONDBLCLK, WM_NULL, WM_QUERYENDSESSION, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW,
     WS_OVERLAPPED,
@@ -29,7 +30,6 @@ use super::ipc::{
 use super::{registry, wide};
 use crate::config::{self, Config, LoadOutcome};
 use crate::engine::{self, Engine};
-use crate::icon::app_icon_rgba;
 use crate::restore::{self, RestoreFile};
 
 const WM_TRAY: u32 = WM_APP + 1;
@@ -41,7 +41,8 @@ const WM_APP_EVALUATE: u32 = WM_APP + 3;
 const ID_SETTINGS: usize = 1;
 const ID_EXIT: usize = 2;
 const ICON_ID: u32 = 1;
-const ICON_SIZE: u32 = 32;
+/// Icon resource ID in the exe (assets/brightmarmot.rc).
+const APP_ICON_RES: usize = 1;
 /// One-shot re-apply after a foreground or display change (some games reset the ramp when they go fullscreen).
 const REAPPLY_TIMER: usize = 1;
 const REAPPLY_MS: u32 = 750;
@@ -82,6 +83,9 @@ thread_local! {
 }
 
 pub fn run() -> i32 {
+    // Before any window exists, so the tray icon is loaded at the right size for the screen's DPI. Failure is fine.
+    // SAFETY: plain call.
+    unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
     let Some(_guard) = single_instance(MUTEX_TRAY) else {
         notify_tray(MSG_OPEN_SETTINGS);
         return 0;
@@ -112,13 +116,10 @@ pub fn run() -> i32 {
     }
 
     // 6. Window, icon, hook, then apply in case a game is already in front.
-    let icon = create_icon();
-    if icon.is_null() {
-        return 1;
-    }
+    let icon = load_icon();
     let hwnd = create_window();
     if hwnd.is_null() {
-        // SAFETY: icon from CreateIcon, destroyed once.
+        // SAFETY: icon from LoadImageW/LoadIconW, destroyed once (harmless no-op for null or the shared stock icon).
         unsafe { DestroyIcon(icon) };
         return 1;
     }
@@ -149,7 +150,7 @@ pub fn run() -> i32 {
     // destroyed with this thread when the process exits.
     shutdown();
     COLOURS.set(None);
-    // SAFETY: icon from CreateIcon, no longer used by the (removed) tray icon.
+    // SAFETY: icon from LoadImageW/LoadIconW, no longer used by the (removed) tray icon.
     unsafe { DestroyIcon(icon) };
     0
 }
@@ -194,14 +195,20 @@ fn tell_user(text: &str) {
     unsafe { MessageBoxW(null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONWARNING | MB_SETFOREGROUND) };
 }
 
-/// 32-bpp icon from the generated RGBA (converted to BGRA); alpha carries the shape.
-fn create_icon() -> HICON {
-    let bgra: Vec<u8> = app_icon_rgba(ICON_SIZE).chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
-    // AND mask: 1 bit per pixel, rows padded to 16 bits; all zero = opaque (alpha is used for 32 bpp).
-    let mask = vec![0u8; (ICON_SIZE as usize).div_ceil(16) * 2 * ICON_SIZE as usize];
-    // SAFETY: buffers match the declared dimensions and are copied by CreateIcon.
+/// The exe's embedded icon at the small-icon size for the current DPI; the stock application icon
+/// if that fails, and null (no icon) if even that does.
+fn load_icon() -> HICON {
+    // SAFETY: resource id passed as MAKEINTRESOURCE; the returned icon is destroyed once at exit.
     unsafe {
-        CreateIcon(GetModuleHandleW(null()), ICON_SIZE as i32, ICON_SIZE as i32, 1, 32, mask.as_ptr(), bgra.as_ptr())
+        let icon = LoadImageW(
+            GetModuleHandleW(null()),
+            APP_ICON_RES as *const u16,
+            IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON),
+            GetSystemMetrics(SM_CYSMICON),
+            0,
+        );
+        if icon.is_null() { LoadIconW(null_mut(), IDI_APPLICATION) } else { icon as HICON }
     }
 }
 
