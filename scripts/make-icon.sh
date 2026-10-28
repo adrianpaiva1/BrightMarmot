@@ -3,6 +3,7 @@
 # assets/icon-256.png (Settings window icon) from assets/icon.svg.
 # Needs the resvg CLI: cargo install resvg
 set -euo pipefail
+command -v resvg >/dev/null || { echo "resvg not found: cargo install resvg" >&2; exit 1; }
 cd "$(dirname "$0")/.."
 
 tmp=$(mktemp -d)

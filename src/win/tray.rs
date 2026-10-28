@@ -13,7 +13,7 @@ use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, 
 use windows_sys::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, AppendMenuW, ASFW_ANY, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-    DestroyIcon, DestroyMenu, DispatchMessageW, GetCursorPos, GetForegroundWindow, GetMessageW, GetSystemMetrics, HICON, IDI_APPLICATION, IDYES, IMAGE_ICON, LoadIconW, LoadImageW,
+    DestroyIcon, DestroyMenu, DispatchMessageW, GetCursorPos, GetForegroundWindow, GetMessageW, GetSystemMetrics, HICON, IDYES, IMAGE_ICON, LoadImageW,
     KillTimer, MB_ICONINFORMATION, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MB_YESNO, MF_STRING, MSG, MessageBoxW,
     PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, SM_CXSMICON, SM_CYSMICON, TPM_BOTTOMALIGN, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_DESTROY, WM_DISPLAYCHANGE, WM_ENDSESSION,
@@ -119,8 +119,10 @@ pub fn run() -> i32 {
     let icon = load_icon();
     let hwnd = create_window();
     if hwnd.is_null() {
-        // SAFETY: icon from LoadImageW/LoadIconW, destroyed once (harmless no-op for null or the shared stock icon).
-        unsafe { DestroyIcon(icon) };
+        if !icon.is_null() {
+            // SAFETY: icon from LoadImageW, destroyed once.
+            unsafe { DestroyIcon(icon) };
+        }
         return 1;
     }
     FIXED.set(Some(Fixed {
@@ -150,8 +152,10 @@ pub fn run() -> i32 {
     // destroyed with this thread when the process exits.
     shutdown();
     COLOURS.set(None);
-    // SAFETY: icon from LoadImageW/LoadIconW, no longer used by the (removed) tray icon.
-    unsafe { DestroyIcon(icon) };
+    if !icon.is_null() {
+        // SAFETY: icon from LoadImageW, no longer used by the (removed) tray icon.
+        unsafe { DestroyIcon(icon) };
+    }
     0
 }
 
@@ -195,8 +199,7 @@ fn tell_user(text: &str) {
     unsafe { MessageBoxW(null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONWARNING | MB_SETFOREGROUND) };
 }
 
-/// The exe's embedded icon at the small-icon size for the current DPI; the stock application icon
-/// if that fails, and null (no icon) if even that does.
+/// The exe's embedded icon at the small-icon size for the current DPI, or null (blank tray slot) if it can't be loaded.
 fn load_icon() -> HICON {
     // SAFETY: resource id passed as MAKEINTRESOURCE; the returned icon is destroyed once at exit.
     unsafe {
@@ -208,7 +211,7 @@ fn load_icon() -> HICON {
             GetSystemMetrics(SM_CYSMICON),
             0,
         );
-        if icon.is_null() { LoadIconW(null_mut(), IDI_APPLICATION) } else { icon as HICON }
+        icon as HICON
     }
 }
 
